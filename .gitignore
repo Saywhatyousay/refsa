@@ -3,9 +3,10 @@ __pycache__/
 *.pyc
 *.pyo
 
-# PyInstaller 构建产物
+# PyInstaller 构建产物（仅放行成品 exe，其余 dist 内容仍忽略）
 build/
-dist/
+dist/*
+!dist/RefSA.exe
 *.spec
 
 # 运行日志与本地数据
