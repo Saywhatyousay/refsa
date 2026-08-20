@@ -7,8 +7,8 @@ RefSA（Reference Search and Add）是一个 Windows 桌面小工具。它常驻
 
 - 操作系统：Windows 10 或 Windows 11。
 - Zotero：需使用 **Zotero 10 或更新版本**，已安装且正在运行，并启用本地 HTTP 服务器。
-  - 打开 Zotero，菜单「编辑 - 设置 - 高级 - 常规」，勾选「允许本机上的其他应用程序连接 Zotero」。
-- 网络：能访问 Crossref（用于检索与匹配文献）。
+  - 打开 Zotero，菜单「编辑 - 设置 - 高级 - 杂项」，勾选「允许本机上的其他应用程序与 Zotero 通讯」。
+- 网络：能访问 Crossref（用于检索与匹配文献）；建议开启 VPN.
 
 ## 使用方式
 
