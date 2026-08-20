@@ -1,37 +1,25 @@
-"""RefSA 入口：后台常驻，等待全局热键触发完整工作流。状态写日志，结果用系统 toast 报告。"""
+"""RefSA 入口。
+
+前台进程只负责两件事：处理一次性 CLI 命令，或在打印初始化信息后
+分离出一个无控制台的后台进程（内部 --daemon 模式）常驻等待热键，
+然后立即退出——于是双击时控制台打印完自动关闭，PowerShell/cmd 里
+启动则把控制权立即归还。状态写日志，结果用系统 toast 报告。
+"""
 import ctypes
 import json
 import logging
 import os
+import subprocess
 import sys
 
 import config
 import crossref
 import hotkey
 import notifications
+import shortcut
 import zotero
 from clipboard import capture_selection
 from logging_setup import get_logger
-
-
-def _hide_console_if_double_clicked():
-    """后台运行（无 CLI 参数）时，若本进程独占控制台（即被双击打开），隐藏窗口。
-
-    GetConsoleProcessList 返回挂在该控制台上的进程数：
-    - 只有本进程（<=1）→ 双击新建的控制台，隐藏它，避免弹黑框；
-    - 还有别的进程（cmd / PowerShell 终端）→ 共享终端，不能隐藏。
-    """
-    try:
-        kernel32 = ctypes.windll.kernel32
-        console = kernel32.GetConsoleWindow()
-        if not console:
-            return
-        pid_list = (ctypes.c_uint * 4)()
-        n = kernel32.GetConsoleProcessList(pid_list, 4)
-        if n <= 1:
-            ctypes.windll.user32.ShowWindow(console, 0)  # SW_HIDE
-    except Exception:
-        pass
 
 
 logger = get_logger()
@@ -203,23 +191,34 @@ def _handle_cli():
     return False
 
 
-def main():
-    # 有命令行参数即为一次性 CLI 命令，跳过启动日志，让输出干净
-    if not sys.argv[1:]:
-        logger.info("=== RefSA starting ===")
-        logger.info("Hotkey configured: %s", config.HOTKEY)
-        logger.info("Zotero base: %s", config.ZOTERO_BASE)
+def _detach_console():
+    """让后台 daemon 脱离自己持有的控制台。
 
-    # 一次性迁移旧 data/ 下的配置与凭证到用户数据目录
+    --console 打包的 PyInstaller bootloader 会在进程没有控制台时自行
+    AllocConsole()，凭空多出一个空的、永不关闭的控制台窗口。daemon 一
+    启动就 FreeConsole() 脱离它；若本来就没有控制台则无操作。
+    """
+    try:
+        ctypes.windll.kernel32.FreeConsole()
+    except Exception:
+        pass
+
+
+def _run_background():
+    """内部 --daemon 模式：无控制台常驻，负责快捷键监听、快捷方式与启动 toast。
+
+    由前台进程以分离进程方式拉起，结束后前台立即退出。
+    """
+    _detach_console()
     zotero._migrate_legacy_data()
-
-    if _handle_cli():
-        return
-
-    # 后台运行：双击场景下隐藏自己的控制台窗口，避免黑框
-    _hide_console_if_double_clicked()
     config.TARGET_COLLECTION = _load_target_collection()
+    logger.info("=== RefSA daemon starting ===")
+    logger.info("Hotkey configured: %s", config.HOTKEY)
+    logger.info("Zotero base: %s", config.ZOTERO_BASE)
     logger.info("Target collection: %s", config.TARGET_COLLECTION or "My Library (root)")
+
+    # 先确保开始菜单快捷方式（带 AUMID），toast 左上角小图标才能显示
+    shortcut.ensure_app_shortcut()
 
     ok = hotkey.register(_handle_trigger)
     if not ok:
@@ -239,6 +238,68 @@ def main():
         hotkey.wait()
     except KeyboardInterrupt:
         logger.info("RefSA stopped by user.")
+
+
+def _spawn_daemon():
+    """以分离进程启动后台常驻，随后父进程即可退出。
+
+    PYINSTALLER_RESET_ENVIRONMENT=1 让 onefile 打包的子进程重新解压到自己的
+    临时目录，而非复用父进程的 _MEI 目录——否则父进程退出时清理临时目录
+    会被后台子进程占用而失败，导致父进程卡约 16 秒才退出。
+    """
+    if getattr(sys, "frozen", False):
+        cmd = [sys.executable, "--daemon"]
+    else:
+        cmd = [sys.executable, __file__, "--daemon"]
+    env = dict(os.environ)
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    # SW_HIDE 让 daemon 被分配的控制台一开始就隐藏（配合 _detach_console）
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = 0  # SW_HIDE
+    subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+        env=env,
+        startupinfo=si,
+    )
+    logger.info("Daemon spawned: %s", cmd)
+
+
+def main():
+    # 内部 daemon 模式：由前台进程分离启动，无控制台常驻
+    if "--daemon" in sys.argv[1:]:
+        _run_background()
+        return
+
+    # 一次性迁移旧 data/ 下的配置与凭证到用户数据目录
+    zotero._migrate_legacy_data()
+
+    # 一次性 CLI 命令（-v / -l / -c 等）处理完即退出
+    if _handle_cli():
+        return
+
+    # 启动后台监听：打印初始化信息（双击可见；PS/cmd 里输出完控制权即归还），
+    # 然后分离出一个后台进程并退出，本进程不阻塞调用方。
+    logger.info("=== RefSA starting ===")
+    logger.info("Hotkey configured: %s", config.HOTKEY)
+    logger.info("Zotero base: %s", config.ZOTERO_BASE)
+    config.TARGET_COLLECTION = _load_target_collection()
+    logger.info("Target collection: %s", config.TARGET_COLLECTION or "My Library (root)")
+
+    print("RefSA starting...")
+    print(f"Hotkey configured: {_hotkey_display()}")
+    print(f"Target collection: {_startup_target_label()}")
+    try:
+        _spawn_daemon()
+    except Exception as exc:
+        logger.exception("Failed to spawn daemon")
+        print(f"Failed to start: {exc}")
+        sys.exit(1)
+    print("RefSA is now running in the background.")
 
 
 if __name__ == "__main__":
