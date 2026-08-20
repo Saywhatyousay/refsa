@@ -27,6 +27,21 @@ def _target_label() -> str:
     return zotero.collection_name_by_key(config.TARGET_COLLECTION)
 
 
+def _startup_target_label() -> str:
+    """启动 toast 用的目标位置可读名；查不到分类时回退为 key，绝不抛异常。"""
+    if not config.TARGET_COLLECTION:
+        return "My Library"
+    try:
+        return zotero.collection_name_by_key(config.TARGET_COLLECTION)
+    except Exception:
+        return config.TARGET_COLLECTION
+
+
+def _hotkey_display() -> str:
+    """把 config.HOTKEY（如 ctrl+alt+r）格式化为用户可读的 Ctrl+Alt+R。"""
+    return "+".join(p.capitalize() for p in config.HOTKEY.split("+"))
+
+
 def _handle_trigger():
     """热键触发后的完整工作流。单次失败仅记 log + toast，不影响热键继续监听。"""
     try:
@@ -131,6 +146,10 @@ def _handle_cli():
     """处理命令行参数，返回 True 表示应退出进程（不常驻）。"""
     args = sys.argv[1:]
 
+    if "-v" in args or "--version" in args:
+        print(f"RefSA {config.VERSION}")
+        return True
+
     if "--list-collections" in args or "-l" in args:
         _print_collection_tree(zotero.list_collections(), _load_target_collection())
         return True
@@ -181,6 +200,14 @@ def main():
         logger.error("Hotkey registration failed, exiting.")
         sys.exit(1)
     logger.info("Hotkey registered. RefSA running in background.")
+
+    # 启动完成：弹一条三行通知（热键 / 目标分类 / 后台就绪）
+    notifications.notify(
+        "RefSA",
+        f"Hotkey configured: {_hotkey_display()}\n"
+        f"Target collection: {_startup_target_label()}\n"
+        f"RefSA running in background.",
+    )
 
     try:
         hotkey.wait()
