@@ -1,4 +1,5 @@
 """RefSA 入口：后台常驻，等待全局热键触发完整工作流。状态写日志，结果用系统 toast 报告。"""
+import ctypes
 import json
 import logging
 import os
@@ -11,6 +12,27 @@ import notifications
 import zotero
 from clipboard import capture_selection
 from logging_setup import get_logger
+
+
+def _hide_console_if_double_clicked():
+    """后台运行（无 CLI 参数）时，若本进程独占控制台（即被双击打开），隐藏窗口。
+
+    GetConsoleProcessList 返回挂在该控制台上的进程数：
+    - 只有本进程（<=1）→ 双击新建的控制台，隐藏它，避免弹黑框；
+    - 还有别的进程（cmd / PowerShell 终端）→ 共享终端，不能隐藏。
+    """
+    try:
+        kernel32 = ctypes.windll.kernel32
+        console = kernel32.GetConsoleWindow()
+        if not console:
+            return
+        pid_list = (ctypes.c_uint * 4)()
+        n = kernel32.GetConsoleProcessList(pid_list, 4)
+        if n <= 1:
+            ctypes.windll.user32.ShowWindow(console, 0)  # SW_HIDE
+    except Exception:
+        pass
+
 
 logger = get_logger()
 
@@ -182,9 +204,11 @@ def _handle_cli():
 
 
 def main():
-    logger.info("=== RefSA starting ===")
-    logger.info("Hotkey configured: %s", config.HOTKEY)
-    logger.info("Zotero base: %s", config.ZOTERO_BASE)
+    # 有命令行参数即为一次性 CLI 命令，跳过启动日志，让输出干净
+    if not sys.argv[1:]:
+        logger.info("=== RefSA starting ===")
+        logger.info("Hotkey configured: %s", config.HOTKEY)
+        logger.info("Zotero base: %s", config.ZOTERO_BASE)
 
     # 一次性迁移旧 data/ 下的配置与凭证到用户数据目录
     zotero._migrate_legacy_data()
@@ -192,6 +216,8 @@ def main():
     if _handle_cli():
         return
 
+    # 后台运行：双击场景下隐藏自己的控制台窗口，避免黑框
+    _hide_console_if_double_clicked()
     config.TARGET_COLLECTION = _load_target_collection()
     logger.info("Target collection: %s", config.TARGET_COLLECTION or "My Library (root)")
 

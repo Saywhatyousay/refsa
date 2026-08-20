@@ -39,6 +39,8 @@ NOTIFY_DURATION = "short"
 _ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 TOAST_ICON = os.path.join(_ASSET_DIR, "refsa_icon.png")
 EXE_ICON = os.path.join(_ASSET_DIR, "refsa_icon.ico")  # 供 PyInstaller --icon 使用
+# toast 左上角小图标用的小尺寸方形 PNG（过大图标易加载失败）
+TOAST_LOGO = os.path.join(_ASSET_DIR, "refsa_logo.png")
 
 # ---- 用户数据目录（发行版可写）----
 # 配置与凭证存到 %APPDATA%\RefSA\，避免打包 exe 装在不可写位置时失效。

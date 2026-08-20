@@ -69,7 +69,7 @@ def notify(title: str, message: str):
             f'<text id="{i + 2}"><![CDATA[{ln}]]></text>'
             for i, ln in enumerate(lines)
         )
-        icon = "file:///" + config.TOAST_ICON.replace("\\", "/")
+        icon = "file:///" + config.TOAST_LOGO.replace("\\", "/")
         script = f'''
 # 加载 Windows 运行时类型（WinRT），否则下面的类型无法解析
 [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null
@@ -79,7 +79,7 @@ def notify(title: str, message: str):
 $ToastXml = @"
 <toast duration="{config.NOTIFY_DURATION}">
   <visual>
-    <binding template="ToastText04">
+    <binding template="ToastGeneric">
       <text id="1"><![CDATA[{title}]]></text>
       {body}
       <image placement="appLogoOverride" src="{icon}" />
